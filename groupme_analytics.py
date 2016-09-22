@@ -114,18 +114,23 @@ def prepare_user_dictionary(members_of_group_data):
     return user_dictionary
 
 def retrieve_all_messages(group_id):
-    response = requests.get('https://api.groupme.com/v3/groups/'+group_id+'/messages?token='+at)
+    MESSAGES_PER_PAGE = 100
+    endpoint = 'https://api.groupme.com/v3/groups/{}/messages?token={}&limit={}'.format(group_id, at, MESSAGES_PER_PAGE)
+    response = requests.get(endpoint)
     data = response.json()
     messages = data['response']['messages']
     total_message_count = data['response']['count']
-    MESSAGES_PER_PAGE = 20
 
     print("Retrieving messages from Group Me in {} pages.".format(total_message_count/MESSAGES_PER_PAGE))
     while len(messages) < total_message_count:
         message_id = messages[-1]['id']
         payload = {'before_id': message_id}
-        response = requests.get('https://api.groupme.com/v3/groups/'+group_id+'/messages?token='+at, params=payload)
-        data = response.json()
+        try:
+            endpoint = "https://api.groupme.com/v3/groups/{}/messages?token={}&limit={}".format(group_id, at, MESSAGES_PER_PAGE)
+            response = requests.get(endpoint, params=payload)
+            data = response.json()
+        except:
+            break
         new_messages = data['response']['messages']
         messages.extend(new_messages)
         sys.stdout.write(str("."))
@@ -261,7 +266,7 @@ def display_data(user_id_mapped_to_user_data):
             sys.stdout.write(str(percent) + '%, ')
         print
 
-        print('Percent of each member\'s total likes that went to ' + str(user_id_mapped_to_user_data[key][0]) + ': ')
+        print('Percent of each member\'s total likes that went to ' + unicode(user_id_mapped_to_user_data[key][0]) + ': ')
         for key_inner in user_id_mapped_to_user_data[key][5]:
             sys.stdout.write(user_id_mapped_to_user_data[key_inner][0])
             convert_to_percent = (user_id_mapped_to_user_data[key][5][key_inner] /
