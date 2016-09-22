@@ -1,6 +1,7 @@
 import requests
 import re
 import sys
+import datetime
 from pprint import pprint
 
 at = ""  # this is a global variable that stores the API token
@@ -10,19 +11,29 @@ def menu():
     global at
     print('If you have not done so already, go to the following website to receive your API token: ' +
           'https://dev.groupme.com/. When signing up, it does not matter what you put for the callback URL')
-    at = str(raw_input("Enter your developer access token:"))
+    # at = str(raw_input("Enter your developer access token:"))
+    at = '924b8230278c0134013127c7804e57a7'
     print("Here are your ten most recent groups:")
     groups_data = print_all_groups_with_number_beside_each()
     try:
         group_number = int(raw_input("Enter the number of the group you would like to analyze:"))
         group_id = get_group_id(groups_data, group_number)
-        prepare_analysis_of_group(groups_data, group_id)
+        print
     except ValueError:
         print("Not a number")
 
+    global start_date # hate this, but just keeping the same style as original
+    try:
+        start_date_string = raw_input("Choose a start date for analysis, in format YYYY-MM-DD [Leave blank for all messages]:")
+        start_date = datetime.datetime.strptime(start_date_string, "%Y-%m-%d")
+    except Exception, e:
+        start_date = None
+        _ = raw_input("Unable to understand that date input. Using all messagse in group for analysis. Press Enter to continue.")
+
+    prepare_analysis_of_group(groups_data, group_id)
 
 def print_all_groups_with_number_beside_each():
-    response = requests.get('https://api.groupme.com/v3/groups/?token='+at)
+    response = requests.get('https://api.groupme.com/v3/groups?token='+at)
     data = response.json()
 
     if len(data['response']) == 0:
@@ -44,7 +55,12 @@ def prepare_analysis_of_group(groups_data, group_id):
     # these three lines simply display info to the user before the analysis begins
     group_name = get_group_name(groups_data, group_id)
     number_of_messages = get_number_of_messages_in_group(groups_data, group_id)
-    print("Analyzing "+str(number_of_messages) + " messages from " + group_name)
+    print('Group "{}" has {} total messages'.format(group_name, number_of_messages))
+
+    if not start_date  is None:
+        print('Only using messages starting {}'.format(start_date.date()))
+    else:
+        print("Analyzing "+str(number_of_messages) + " messages from " + group_name)
 
     #these two lines put all the members currently in the group into a dictionary
     members_of_group_data = get_group_members(groups_data, group_id)
@@ -98,16 +114,45 @@ def prepare_user_dictionary(members_of_group_data):
         i += 1
     return user_dictionary
 
+def retrieve_all_messages(group_id):
+    response = requests.get('https://api.groupme.com/v3/groups/'+group_id+'/messages?token='+at)
+    data = response.json()
+    messages = data['response']['messages']
+    total_message_count = data['response']['count']
+    MESSAGES_PER_PAGE = 20
+
+    print("Retrieving messages from Group Me in {} pages.".format(total_message_count/MESSAGES_PER_PAGE))
+    while len(messages) < total_message_count:
+        message_id = messages[-1]['id']
+        payload = {'before_id': message_id}
+        response = requests.get('https://api.groupme.com/v3/groups/'+group_id+'/messages?token='+at, params=payload)
+        data = response.json()
+        new_messages = data['response']['messages']
+        messages.extend(new_messages)
+        sys.stdout.write(str("."))
+        sys.stdout.flush()
+
+    return messages
+
 
 def analyze_group(group_id, user_id_mapped_to_user_data, number_of_messages):
 
-    response = requests.get('https://api.groupme.com/v3/groups/'+group_id+'/messages?token='+at)
-    data = response.json()
     message_with_only_alphanumeric_characters = ''
     message_id = 0
     iterations = 0.0
-    while True:
-        for i in range(20):  # in range of 20 because API sends 20 messages at once
+
+    messages = retrieve_all_messages(group_id)
+
+
+    if not start_date is None:
+        print "Total Messages In Group: {}".format(len(messages))
+        start_posix = int(start_date.strftime('%s'))
+        messages = [m for m in messages if m.get('created_at') > start_posix]
+        print "Total Messages In Group After Filtering For Start Date: {}".format(len(messages))
+
+    data = {'response':{'messages': messages}}
+    if True: # just changed this so git doesn't show the whitespace change :sob:
+        for i in range(len(messages)):  # in range of 20 because API sends 20 messages at once
             try:
 
                 iterations += 1
@@ -159,6 +204,8 @@ def analyze_group(group_id, user_id_mapped_to_user_data, number_of_messages):
                 user_id_mapped_to_user_data[sender_id][2] += length_of_favs
                 user_id_mapped_to_user_data[sender_id][4] += number_of_words_in_message
 
+                if i == len(messages) - 1:
+                    raise IndexError, ":sob:" #the way to kick this back to the return block...
             except IndexError:
                 print("COMPLETE")
                 print
@@ -169,16 +216,13 @@ def analyze_group(group_id, user_id_mapped_to_user_data, number_of_messages):
                         user_id_mapped_to_user_data[key][3] = 0
                 return user_id_mapped_to_user_data
 
-        if i == 19:
+        WE_CARE_ABOUT_ANALYSIS_PROGRESS = False
+        if WE_CARE_ABOUT_ANALYSIS_PROGRESS:
                 message_id = data['response']['messages'][i]['id']
                 remaining = iterations/number_of_messages
                 remaining *= 100
                 remaining = round(remaining, 2)
                 print(str(remaining)+' percent done')
-
-        payload = {'before_id': message_id}
-        response = requests.get('https://api.groupme.com/v3/groups/'+group_id+'/messages?token='+at, params=payload)
-        data = response.json()
 
 
 def display_data(user_id_mapped_to_user_data):
